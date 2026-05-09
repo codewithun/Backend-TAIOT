@@ -1,3 +1,5 @@
+const { addAiInteraction } = require('../store')
+
 function pickPrompt(body = {}) {
   return body.prompt || body.message || body.text || body.input || ''
 }
@@ -14,7 +16,7 @@ async function postAi(req, res, next) {
 
     const baseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
     const model = req.body?.model || process.env.OLLAMA_MODEL || 'llama3.1'
-    const payload = {
+    const requestPayload = {
       model,
       prompt,
       stream: false,
@@ -25,7 +27,7 @@ async function postAi(req, res, next) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestPayload),
     })
 
     const data = await response.json().catch(() => null)
@@ -38,7 +40,7 @@ async function postAi(req, res, next) {
       })
     }
 
-    return res.json({
+    const responsePayload = {
       success: true,
       provider: 'ollama',
       model,
@@ -47,7 +49,17 @@ async function postAi(req, res, next) {
         response: data?.response || '',
         raw: data,
       },
+    }
+
+    await addAiInteraction({
+      prompt,
+      response: responsePayload.data.response,
+      model,
+      provider: 'ollama',
+      raw: data,
     })
+
+    return res.json(responsePayload)
   } catch (error) {
     return res.status(503).json({
       success: false,

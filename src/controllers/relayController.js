@@ -3,7 +3,7 @@ const { sendRelayControl } = require('../services/externalApiService')
 
 async function getRelayStateHandler(_req, res, next) {
   try {
-    const state = getRelayState()
+    const state = await getRelayState()
 
     return res.json({
       success: true,
@@ -36,7 +36,7 @@ async function postRelayControl(req, res, next) {
       })
     }
 
-    const current = getRelayState()
+    const current = await getRelayState()
     const nextState = {
       relay1: hasRelay1 ? inputState.relay1 : current.relay1,
       relay2: hasRelay2 ? inputState.relay2 : current.relay2,
@@ -44,7 +44,7 @@ async function postRelayControl(req, res, next) {
 
     await sendRelayControl(nextState)
 
-    const state = updateRelayState(nextState, 'api')
+    const state = await updateRelayState(nextState, 'api')
 
     return res.json({
       success: true,

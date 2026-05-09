@@ -5,14 +5,25 @@ const {
   toNumber,
 } = require('../store')
 
-function postPzem(req, res) {
-  const reading = addReading(req.body || {}, 'esp')
+async function postPzem(req, res, next) {
+  try {
+    const reading = await addReading(req.body || {}, 'esp')
 
-  return res.status(201).json({
-    success: true,
-    message: 'PZEM data stored',
-    data: reading,
-  })
+    return res.status(201).json({
+      success: true,
+      message: 'PZEM data stored',
+      data: reading,
+    })
+  } catch (error) {
+    if (typeof next === 'function') {
+      return next(error)
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to store PZEM data',
+      error: error.message,
+    })
+  }
 }
 
 async function getLatestPzem(_req, res, next) {
@@ -38,7 +49,7 @@ async function getLatestPzem(_req, res, next) {
 async function getPzemHistory(req, res, next) {
   try {
     const limit = toNumber(req.query.limit, 24)
-    const data = getReadingHistory(limit)
+    const data = await getReadingHistory(limit)
 
     return res.json({
       success: true,

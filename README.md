@@ -1,6 +1,6 @@
 # Backend-TAIOT
 
-REST API backend untuk sistem monitoring energi listrik dengan integrasi ke external API dan Ollama AI.
+REST API backend untuk sistem monitoring energi listrik dengan integrasi ke external API, Ollama AI, dan PostgreSQL via Prisma.
 
 ## Setup
 
@@ -15,6 +15,11 @@ npm start          # Production
 Copy `.env.example` ke `.env.local` dan sesuaikan:
 
 ```env
+DATABASE_URL=postgresql://postgres@localhost:5432/taiot
+# Aggregation Configuration
+AGGREGATION_INTERVAL=300000
+RAW_RETENTION_DAYS=30
+TARIFF_PER_KWH=1444
 EXTERNAL_API_BASE=https://api.zxnco.my.id
 POLL_INTERVAL=10000
 OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -35,6 +40,9 @@ PORT=3000
 - **POST /pzem** - Simpan data PZEM dari ESP (fallback jika external API tidak tersedia)
   - Body: `{ voltage, current, frequency, power, energy, powerFactor, ... }`
   - Response: `{ success, message, data }`
+
+- **GET /summary** - Snapshot summary energi saat ini
+  - Response: `{ success, data: { daily, weekly, monthly } }`
 
 ### Relay Control
 
@@ -93,8 +101,10 @@ Backend secara otomatis mengambil data dari **https://api.zxnco.my.id/pzem**:
 ### Cache & Fallback
 
 - Data di-cache untuk menghindari rate limiting
-- Jika external API gagal, gunakan data lokal terakhir
-- Fallback ke demo data jika belum ada data
+- Jika external API gagal, gunakan data terakhir yang tersimpan di database
+- Tidak ada lagi seed demo data untuk penyimpanan API
+- Raw PZEM lama dipangkas sesuai `RAW_RETENTION_DAYS`
+- Summary harian, mingguan, dan bulanan dihitung otomatis oleh job background
 
 ## Folder Structure
 

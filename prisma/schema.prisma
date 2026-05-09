@@ -1,0 +1,131 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model PzemReading {
+  id             String   @id @default(cuid())
+  deviceId       String
+  timestamp      DateTime
+  serverTimestamp DateTime @default(now())
+  voltage        Float
+  current        Float
+  frequency      Float
+  power          Float
+  energy         Float
+  powerFactor    Float
+  relay1         Boolean  @default(false)
+  relay2         Boolean  @default(false)
+  source         String
+  ok             Boolean  @default(false)
+  raw            Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([timestamp, deviceId, source], name: "timestamp_deviceId_source")
+  @@index([deviceId])
+  @@index([timestamp])
+  @@index([serverTimestamp])
+}
+
+model DailySummary {
+  id               String   @id @default(cuid())
+  periodKey        String   @unique
+  periodStart      DateTime
+  periodEnd        DateTime
+  durationHours    Float
+  readingCount     Int      @default(0)
+  consumptionKwh   Float    @default(0)
+  estimatedCost    Float    @default(0)
+  averagePower     Float    @default(0)
+  averageVoltage   Float    @default(0)
+  averageCurrent   Float    @default(0)
+  averageFrequency Float    @default(0)
+  averagePowerFactor Float  @default(0)
+  tariffPerKwh     Float    @default(1444)
+  source           String   @default("aggregation")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([periodStart])
+  @@index([periodEnd])
+}
+
+model WeeklySummary {
+  id               String   @id @default(cuid())
+  periodKey        String   @unique
+  periodStart      DateTime
+  periodEnd        DateTime
+  durationHours    Float
+  readingCount     Int      @default(0)
+  consumptionKwh   Float    @default(0)
+  estimatedCost    Float    @default(0)
+  averagePower     Float    @default(0)
+  averageVoltage   Float    @default(0)
+  averageCurrent   Float    @default(0)
+  averageFrequency Float    @default(0)
+  averagePowerFactor Float  @default(0)
+  tariffPerKwh     Float    @default(1444)
+  source           String   @default("aggregation")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([periodStart])
+  @@index([periodEnd])
+}
+
+model MonthlySummary {
+  id               String   @id @default(cuid())
+  periodKey        String   @unique
+  periodStart      DateTime
+  periodEnd        DateTime
+  durationHours    Float
+  readingCount     Int      @default(0)
+  consumptionKwh   Float    @default(0)
+  estimatedCost    Float    @default(0)
+  averagePower     Float    @default(0)
+  averageVoltage   Float    @default(0)
+  averageCurrent   Float    @default(0)
+  averageFrequency Float    @default(0)
+  averagePowerFactor Float  @default(0)
+  tariffPerKwh     Float    @default(1444)
+  source           String   @default("aggregation")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([periodStart])
+  @@index([periodEnd])
+}
+
+model RelayState {
+  id        String   @id @default(cuid())
+  relay1    Boolean  @default(false)
+  relay2    Boolean  @default(false)
+  source    String
+  raw       Json?
+  createdAt DateTime @default(now())
+
+  @@index([source])
+  @@index([createdAt])
+}
+
+model AiInteraction {
+  id        String   @id @default(cuid())
+  prompt    String
+  response  String
+  model     String
+  provider  String   @default("ollama")
+  raw       Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
