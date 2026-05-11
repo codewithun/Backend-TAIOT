@@ -74,14 +74,13 @@ async function createRelayStateRecord(relay1, relay2, source, raw = null) {
   const normalized1 = normalizeBoolean(relay1, false)
   const normalized2 = normalizeBoolean(relay2, false)
   
-  // Get the latest RelayState for this source
-  const existing = await prisma.relayState.findFirst({
-    where: { source },
+  // Get the latest RelayState globally (regardless of source)
+  const latestGlobal = await prisma.relayState.findFirst({
     orderBy: { createdAt: 'desc' },
   })
   
-  // Only create new record if state changed
-  if (!existing || existing.relay1 !== normalized1 || existing.relay2 !== normalized2) {
+  // Only create new record if state actually changed
+  if (!latestGlobal || latestGlobal.relay1 !== normalized1 || latestGlobal.relay2 !== normalized2) {
     return prisma.relayState.create({
       data: {
         relay1: normalized1,
@@ -92,7 +91,8 @@ async function createRelayStateRecord(relay1, relay2, source, raw = null) {
     })
   }
   
-  return existing
+  // State tidak berubah - return existing record tanpa menyimpan
+  return latestGlobal
 }
 
 async function addReading(payload, source = 'esp') {
@@ -133,7 +133,10 @@ async function addReading(payload, source = 'esp') {
     })
   }
 
-  await createRelayStateRecord(result.relay1, result.relay2, source, result.raw)
+  // Only save relay state for non-external-api sources (esp, server)
+  if (source !== 'external-api') {
+    await createRelayStateRecord(result.relay1, result.relay2, source, result.raw)
+  }
 
   return result
 }
@@ -184,9 +187,10 @@ async function syncLatestReading() {
         latestResult = result
       }
 
-      if (readings.length) {
-        const relaySnapshot = readings[readings.length - 1]
-        await createRelayStateRecord(relaySnapshot.relay1, relaySnapshot.relay2, 'external-api', externalData)
+      // Save relay state ONCE after all readings processed
+      if (readings.length > 0) {
+        const lastReading = readings[readings.length - 1]
+        await createRelayStateRecord(lastReading.relay1, lastReading.relay2, 'external-api', externalData)
       }
 
       return latestResult
@@ -199,9 +203,38 @@ async function syncLatestReading() {
 }
 
 async function getLatestReading() {
-  return prisma.pzemReading.findFirst({
-    orderBy: { serverTimestamp: 'desc' },
+  // Get latest reading for each device separately
+  const [pzem1Reading, pzem2Reading] = await Promise.all([
+    prisma.pzemReading.findFirst({
+      where: { deviceId: 'pzem-1' },
+      orderBy: { serverTimestamp: 'desc' },
+    }),
+    prisma.pzemReading.findFirst({
+      where: { deviceId: 'pzem-2' },
+      orderBy: { serverTimestamp: 'desc' },
+    }),
+  ])
+
+  // Get relay state from RelayState table
+  const relayState = await prisma.relayState.findFirst({
+    orderBy: { createdAt: 'desc' },
   })
+
+  // Use the most recent reading's timestamp
+  const mostRecent = [pzem1Reading, pzem2Reading]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.serverTimestamp) - new Date(a.serverTimestamp))[0]
+
+  if (!mostRecent) return null
+
+  // Return combined data with definitive relay state from RelayState table
+  return {
+    ...mostRecent,
+    pzem1: pzem1Reading,
+    pzem2: pzem2Reading,
+    relay1: relayState?.relay1 ?? mostRecent.relay1 ?? false,
+    relay2: relayState?.relay2 ?? mostRecent.relay2 ?? false,
+  }
 }
 
 function getReadingHistory(limit = 24) {
@@ -235,16 +268,29 @@ async function getRelayState() {
     }
   }
 
-  const latestReading = await prisma.pzemReading.findFirst({
-    orderBy: { serverTimestamp: 'desc' },
-  })
+  // Fallback: get relay state from latest readings (check both pzem-1 and pzem-2)
+  const [pzem1Reading, pzem2Reading] = await Promise.all([
+    prisma.pzemReading.findFirst({
+      where: { deviceId: 'pzem-1' },
+      orderBy: { serverTimestamp: 'desc' },
+    }),
+    prisma.pzemReading.findFirst({
+      where: { deviceId: 'pzem-2' },
+      orderBy: { serverTimestamp: 'desc' },
+    }),
+  ])
 
-  if (latestReading) {
+  // Use the most recent reading that has relay state
+  const mostRecent = [pzem1Reading, pzem2Reading]
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.serverTimestamp) - new Date(a.serverTimestamp))[0]
+
+  if (mostRecent) {
     return {
-      relay1: latestReading.relay1,
-      relay2: latestReading.relay2,
-      updatedAt: latestReading.serverTimestamp.toISOString(),
-      source: latestReading.source,
+      relay1: mostRecent.relay1,
+      relay2: mostRecent.relay2,
+      updatedAt: mostRecent.serverTimestamp.toISOString(),
+      source: mostRecent.source,
     }
   }
 
