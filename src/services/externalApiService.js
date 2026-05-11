@@ -73,6 +73,31 @@ function normalizeBoolean(value, fallback = false) {
   return fallback
 }
 
+function mapPzemBlockToReading(pzem = {}, deviceId = 'pzem-1', externalData = {}, source = 'external-api') {
+  const relayData = externalData.relay || (externalData.pzem?.relay) || {}
+  const timestamp = (externalData.updated_at || externalData.pzem?.updated_at)
+    ? new Date((externalData.updated_at || externalData.pzem?.updated_at) * 1000).toISOString()
+    : new Date().toISOString()
+
+  return {
+    id: `pzem_${deviceId}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    deviceId,
+    timestamp,
+    serverTimestamp: new Date().toISOString(),
+    voltage: 220,
+    current: Number(pzem.current ?? 0) || 0,
+    frequency: Number(pzem.frequency ?? 0) || 0,
+    power: Number(pzem.power ?? 0) || 0,
+    energy: Number(pzem.energy ?? 0) || 0,
+    powerFactor: Number(pzem.pf ?? 0) || 0,
+    relay1: normalizeBoolean(relayData.relay1, false),
+    relay2: normalizeBoolean(relayData.relay2, false),
+    source,
+    raw: externalData,
+    ok: pzem.ok === true || pzem.ok === 1 || pzem.ok === 'true',
+  }
+}
+
 async function sendRelayControl(relayPayload = {}) {
   const response = await fetch(`${EXTERNAL_API_BASE}/relay-control`, {
     method: 'POST',
@@ -91,11 +116,27 @@ function getLastError() {
   return lastError
 }
 
+function mapExternalToReadings(externalData = {}, source = 'external-api') {
+  const pzemRoot = externalData.pzem && typeof externalData.pzem === 'object' ? externalData.pzem : externalData
+  const readings = []
+
+  if (pzemRoot.pzem1) {
+    readings.push(mapPzemBlockToReading(pzemRoot.pzem1, 'pzem-1', externalData, source))
+  }
+
+  if (pzemRoot.pzem2) {
+    readings.push(mapPzemBlockToReading(pzemRoot.pzem2, 'pzem-2', externalData, source))
+  }
+
+  return readings
+}
+
 module.exports = {
   EXTERNAL_API_BASE,
   POLL_INTERVAL,
   fetchFromExternalApi,
-  mapExternalToReading,
+  mapPzemBlockToReading,
+  mapExternalToReadings,
   sendRelayControl,
   getLastError,
 }

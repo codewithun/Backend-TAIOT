@@ -1,5 +1,5 @@
 const { prisma } = require('./lib/prisma')
-const { fetchFromExternalApi, mapExternalToReading } = require('./services/externalApiService')
+const { fetchFromExternalApi, mapExternalToReadings } = require('./services/externalApiService')
 
 const INITIAL_RELAY_STATE = {
   relay1: false,
@@ -142,46 +142,54 @@ async function syncLatestReading() {
   try {
     const externalData = await fetchFromExternalApi()
     if (externalData && (externalData.pzem1 || externalData.pzem?.pzem1)) {
-      const reading = mapExternalToReading(externalData, 'external-api')
+      const readings = mapExternalToReadings(externalData, 'external-api')
+      let latestResult = null
 
-      // Check if reading already exists
-      const existing = await prisma.pzemReading.findFirst({
-        where: {
-          timestamp: reading.timestamp,
-          deviceId: reading.deviceId,
-          source: reading.source,
-        },
-      })
-
-      let result
-      if (existing) {
-        // Update existing
-        result = await prisma.pzemReading.update({
-          where: { id: existing.id },
-          data: {
-            voltage: reading.voltage,
-            current: reading.current,
-            frequency: reading.frequency,
-            power: reading.power,
-            energy: reading.energy,
-            powerFactor: reading.powerFactor,
-            relay1: reading.relay1,
-            relay2: reading.relay2,
-            ok: reading.ok,
-            raw: reading.raw,
-            serverTimestamp: reading.serverTimestamp,
+      for (const reading of readings) {
+        // Check if reading already exists
+        const existing = await prisma.pzemReading.findFirst({
+          where: {
+            timestamp: reading.timestamp,
+            deviceId: reading.deviceId,
+            source: reading.source,
           },
         })
-      } else {
-        // Create new
-        result = await prisma.pzemReading.create({
-          data: reading,
-        })
+
+        let result
+        if (existing) {
+          // Update existing
+          result = await prisma.pzemReading.update({
+            where: { id: existing.id },
+            data: {
+              voltage: reading.voltage,
+              current: reading.current,
+              frequency: reading.frequency,
+              power: reading.power,
+              energy: reading.energy,
+              powerFactor: reading.powerFactor,
+              relay1: reading.relay1,
+              relay2: reading.relay2,
+              ok: reading.ok,
+              raw: reading.raw,
+              serverTimestamp: reading.serverTimestamp,
+            },
+          })
+        } else {
+          // Create new
+          result = await prisma.pzemReading.create({
+            data: reading,
+          })
+        }
+
+        latestResult = result
       }
 
-      await createRelayStateRecord(result.relay1, result.relay2, 'external-api', externalData)
+      if (readings.length) {
+        const relaySnapshot = readings[readings.length - 1]
+        await createRelayStateRecord(relaySnapshot.relay1, relaySnapshot.relay2, 'external-api', externalData)
+      }
 
-      return result
+      return latestResult
     }
   } catch (error) {
     console.error('[Store] External API fetch error:', error.message)
