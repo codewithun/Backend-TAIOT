@@ -4,7 +4,36 @@ const { fetchFromExternalApi, mapExternalToReadings } = require('./services/exte
 const INITIAL_RELAY_STATE = {
   relay1: false,
   relay2: false,
+  relays: [
+    { key: 'relay1', label: 'Relay 1', state: false },
+    { key: 'relay2', label: 'Relay 2', state: false },
+  ],
+  relayMap: {
+    relay1: false,
+    relay2: false,
+  },
 }
+
+const DEFAULT_RELAY_DEVICES = [
+  {
+    relayKey: 'relay1',
+    nama: 'Relay 1',
+    description: 'Relay Control 1',
+    warna: '#22d3ee',
+    status: false,
+    isBuiltin: true,
+    sortOrder: 1,
+  },
+  {
+    relayKey: 'relay2',
+    nama: 'Relay 2',
+    description: 'Relay Control 2',
+    warna: '#4ade80',
+    status: false,
+    isBuiltin: true,
+    sortOrder: 2,
+  },
+]
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value)
@@ -16,6 +45,332 @@ function normalizeBoolean(value, fallback = false) {
   if (value === 1 || value === '1' || value === 'true' || value === 'on') return true
   if (value === 0 || value === '0' || value === 'false' || value === 'off') return false
   return fallback
+}
+
+function slugifyRelayKey(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'relay'
+}
+
+function relayDeviceToResponse(device = {}) {
+  return {
+    id: device.id,
+    relayKey: device.relayKey,
+    nama: device.nama,
+    description: device.description || '',
+    warna: device.warna || '#a78bfa',
+    status: device.status ? 'aktif' : 'nonaktif',
+    isBuiltin: Boolean(device.isBuiltin),
+    sortOrder: device.sortOrder || 0,
+    createdAt: device.createdAt?.toISOString?.() || device.createdAt || null,
+    updatedAt: device.updatedAt?.toISOString?.() || device.updatedAt || null,
+  }
+}
+
+function normalizeRelayDeviceInput(input = {}, fallbackKey = null) {
+  const relayKey = String(input.relayKey || fallbackKey || '').trim() || null
+  const nama = String(input.nama || input.name || '').trim()
+  const description = String(input.description || '').trim()
+  const warna = String(input.warna || input.color || '#a78bfa').trim() || '#a78bfa'
+
+  return {
+    relayKey,
+    nama,
+    description,
+    warna,
+    status: normalizeBoolean(input.status ?? input.isActive ?? input.active, false),
+    isBuiltin: normalizeBoolean(input.isBuiltin, false),
+    sortOrder: toNumber(input.sortOrder, 0),
+  }
+}
+
+function relayStateSignature(relay1, relay2, raw = null) {
+  const relays = Array.isArray(raw?.relays) ? raw.relays : []
+  const relayMap = raw?.relayMap && typeof raw.relayMap === 'object' ? raw.relayMap : null
+
+  const signatureRelays = relays.length
+    ? relays.map((entry, index) => {
+      const normalized = normalizeRelayEntry(entry, index)
+      return {
+        key: normalized.key,
+        state: normalizeBoolean(normalized.state, false),
+      }
+    })
+    : relayMap
+      ? Object.entries(relayMap).map(([key, value]) => ({
+        key: String(key),
+        state: normalizeBoolean(value, false),
+      }))
+      : []
+
+  signatureRelays.sort((left, right) => String(left.key).localeCompare(String(right.key)))
+
+  return JSON.stringify({
+    relay1: normalizeBoolean(relay1, false),
+    relay2: normalizeBoolean(relay2, false),
+    relays: signatureRelays,
+  })
+}
+
+function normalizeRelayEntry(entry = {}, index = 0) {
+  if (entry && typeof entry !== 'object') {
+    return {
+      key: `relay${index + 1}`,
+      label: `Relay ${index + 1}`,
+      state: normalizeBoolean(entry, false),
+      raw: entry,
+    }
+  }
+
+  const key = String(entry.key || entry.id || entry.relayKey || `relay${index + 1}`)
+  const label = entry.label || entry.name || key
+  const state = normalizeBoolean(
+    entry.state ?? entry.value ?? entry.active ?? entry.on ?? entry.enabled,
+    false,
+  )
+
+  return {
+    key,
+    label,
+    state,
+    raw: entry,
+  }
+}
+
+function isRelayKey(key) {
+  return /^relay/i.test(String(key || ''))
+}
+
+function extractRelayEntries(input = {}) {
+  if (Array.isArray(input.relays)) {
+    return input.relays.map((entry, index) => normalizeRelayEntry(entry, index))
+  }
+
+  if (input.relayMap && typeof input.relayMap === 'object' && !Array.isArray(input.relayMap)) {
+    return Object.entries(input.relayMap).map(([key, value], index) => normalizeRelayEntry({ key, state: value }, index))
+  }
+
+  return Object.entries(input)
+    .filter(([key]) => isRelayKey(key) && key !== 'relays' && key !== 'relayMap')
+    .map(([key, value], index) => {
+      if (value && typeof value === 'object') {
+        return normalizeRelayEntry({ key, ...value }, index)
+      }
+
+      return normalizeRelayEntry({ key, state: value }, index)
+    })
+}
+
+function sortRelayEntries(entries = []) {
+  return [...entries].sort((left, right) => {
+    const leftMatch = String(left.key).match(/^(.*?)(\d+)$/)
+    const rightMatch = String(right.key).match(/^(.*?)(\d+)$/)
+
+    if (leftMatch && rightMatch && leftMatch[1] === rightMatch[1]) {
+      return Number(leftMatch[2]) - Number(rightMatch[2])
+    }
+
+    return String(left.key).localeCompare(String(right.key))
+  })
+}
+
+async function ensureDefaultRelayDevices() {
+  for (const device of DEFAULT_RELAY_DEVICES) {
+    await prisma.relayDevice.upsert({
+      where: { relayKey: device.relayKey },
+      update: {
+        nama: device.nama,
+        description: device.description,
+        warna: device.warna,
+        isBuiltin: true,
+        sortOrder: device.sortOrder,
+      },
+      create: {
+        relayKey: device.relayKey,
+        nama: device.nama,
+        description: device.description,
+        warna: device.warna,
+        status: device.status,
+        isBuiltin: true,
+        sortOrder: device.sortOrder,
+      },
+    })
+  }
+}
+
+async function getRelayDevices() {
+  await ensureDefaultRelayDevices()
+
+  const devices = await prisma.relayDevice.findMany({
+    orderBy: [
+      { sortOrder: 'asc' },
+      { createdAt: 'asc' },
+    ],
+  })
+
+  return devices.map(relayDeviceToResponse)
+}
+
+async function createRelayDevice(input = {}) {
+  await ensureDefaultRelayDevices()
+
+  const normalized = normalizeRelayDeviceInput(input)
+  if (!normalized.nama) {
+    const error = new Error('Nama relay harus diisi')
+    error.status = 400
+    throw error
+  }
+
+  let relayKey = normalized.relayKey || slugifyRelayKey(normalized.nama)
+  if (!relayKey) relayKey = 'relay'
+
+  const existing = await prisma.relayDevice.findFirst({
+    where: { relayKey },
+  })
+
+  if (existing) {
+    const error = new Error(`Relay key "${relayKey}" sudah digunakan`)
+    error.status = 409
+    throw error
+  }
+
+  const lastDevice = await prisma.relayDevice.findFirst({
+    orderBy: [
+      { sortOrder: 'desc' },
+      { createdAt: 'desc' },
+    ],
+  })
+
+  const created = await prisma.relayDevice.create({
+    data: {
+      relayKey,
+      nama: normalized.nama,
+      description: normalized.description || `Relay Control ${relayKey}`,
+      warna: normalized.warna,
+      status: normalizeBoolean(normalized.status, false),
+      isBuiltin: false,
+      sortOrder: normalized.sortOrder > 0 ? normalized.sortOrder : (lastDevice?.sortOrder || 0) + 1,
+    },
+  })
+
+  return relayDeviceToResponse(created)
+}
+
+async function updateRelayDevice(id, input = {}) {
+  await ensureDefaultRelayDevices()
+
+  const existing = await prisma.relayDevice.findUnique({
+    where: { id },
+  })
+
+  if (!existing) {
+    const error = new Error('Relay device tidak ditemukan')
+    error.status = 404
+    throw error
+  }
+
+  const normalized = normalizeRelayDeviceInput(input, existing.relayKey)
+  const updated = await prisma.relayDevice.update({
+    where: { id },
+    data: {
+      nama: normalized.nama || existing.nama,
+      description: normalized.description || existing.description,
+      warna: normalized.warna || existing.warna,
+      status: input.status === undefined && input.isActive === undefined && input.active === undefined
+        ? existing.status
+        : normalizeBoolean(input.status ?? input.isActive ?? input.active, existing.status),
+      sortOrder: normalized.sortOrder > 0 ? normalized.sortOrder : existing.sortOrder,
+    },
+  })
+
+  return relayDeviceToResponse(updated)
+}
+
+async function deleteRelayDevice(id) {
+  await ensureDefaultRelayDevices()
+
+  const existing = await prisma.relayDevice.findUnique({
+    where: { id },
+  })
+
+  if (!existing) {
+    const error = new Error('Relay device tidak ditemukan')
+    error.status = 404
+    throw error
+  }
+
+  if (existing.isBuiltin) {
+    const error = new Error('Relay bawaan tidak bisa dihapus')
+    error.status = 400
+    throw error
+  }
+
+  await prisma.relayDevice.delete({
+    where: { id },
+  })
+
+  return relayDeviceToResponse(existing)
+}
+
+async function syncRelayDeviceState(relayKey, status) {
+  await ensureDefaultRelayDevices()
+
+  const existing = await prisma.relayDevice.findUnique({
+    where: { relayKey },
+  })
+
+  if (!existing) return null
+
+  const updated = await prisma.relayDevice.update({
+    where: { relayKey },
+    data: { status: normalizeBoolean(status, false) },
+  })
+
+  return relayDeviceToResponse(updated)
+}
+
+function buildRelayStateSnapshot(input = {}, fallback = INITIAL_RELAY_STATE) {
+  const fallbackEntries = Array.isArray(fallback.relays)
+    ? fallback.relays.map((entry, index) => normalizeRelayEntry(entry, index))
+    : extractRelayEntries(fallback)
+
+  const relayEntries = extractRelayEntries(input)
+  const relayMap = {
+    ...Object.fromEntries(fallbackEntries.map(entry => [entry.key, entry.state])),
+  }
+
+  for (const entry of relayEntries) {
+    relayMap[entry.key] = entry.state
+  }
+
+  const orderedEntries = sortRelayEntries([
+    ...fallbackEntries.map(entry => ({ ...entry, state: relayMap[entry.key] ?? entry.state })),
+    ...relayEntries.filter(entry => !fallbackEntries.some(existing => existing.key === entry.key)),
+  ].map(entry => ({
+    ...entry,
+    state: relayMap[entry.key] ?? entry.state,
+  })))
+
+  const relay1 = normalizeBoolean(relayMap.relay1, fallback.relay1 ?? false)
+  const relay2 = normalizeBoolean(relayMap.relay2, fallback.relay2 ?? false)
+
+  return {
+    relay1,
+    relay2,
+    relays: orderedEntries.map(entry => ({
+      key: entry.key,
+      label: entry.label,
+      state: normalizeBoolean(relayMap[entry.key], entry.state),
+      raw: entry.raw ?? null,
+    })),
+    relayMap: Object.fromEntries(
+      orderedEntries.map(entry => [entry.key, normalizeBoolean(relayMap[entry.key], entry.state)]),
+    ),
+    raw: input.raw ?? input,
+  }
 }
 
 function toDate(value, fallback = new Date()) {
@@ -80,6 +435,7 @@ async function createRelayStateRecord(relay1, relay2, source, raw = null) {
   })
   
   // Only create new record if state actually changed
+  const nextSignature = relayStateSignature(normalized1, normalized2, raw)
   if (!latestGlobal || latestGlobal.relay1 !== normalized1 || latestGlobal.relay2 !== normalized2) {
     return prisma.relayState.create({
       data: {
@@ -90,7 +446,22 @@ async function createRelayStateRecord(relay1, relay2, source, raw = null) {
       },
     })
   }
-  
+
+  const latestSignature = latestGlobal
+    ? relayStateSignature(latestGlobal.relay1, latestGlobal.relay2, latestGlobal.raw)
+    : null
+
+  if (!latestSignature || latestSignature !== nextSignature) {
+    return prisma.relayState.create({
+      data: {
+        relay1: normalized1,
+        relay2: normalized2,
+        source,
+        raw,
+      },
+    })
+  }
+
   // State tidak berubah - return existing record tanpa menyimpan
   return latestGlobal
 }
@@ -246,10 +617,13 @@ function getReadingHistory(limit = 24) {
 }
 
 async function updateRelayState(nextState = {}, source = 'server') {
-  const relay1 = normalizeBoolean(nextState.relay1, false)
-  const relay2 = normalizeBoolean(nextState.relay2, false)
+  const snapshot = buildRelayStateSnapshot(nextState, await getRelayState())
 
-  await createRelayStateRecord(relay1, relay2, source, nextState.raw || nextState)
+  await createRelayStateRecord(snapshot.relay1, snapshot.relay2, source, {
+    ...snapshot.raw,
+    relays: snapshot.relays,
+    relayMap: snapshot.relayMap,
+  })
 
   return getRelayState()
 }
@@ -259,12 +633,33 @@ async function getRelayState() {
     orderBy: { createdAt: 'desc' },
   })
 
+  const relayDevices = await getRelayDevices()
+  const relayMap = Object.fromEntries(
+    relayDevices.map(device => [device.relayKey, normalizeBoolean(device.status === 'aktif', false)]),
+  )
+
   if (latest) {
+    const rawRelays = Array.isArray(latest.raw?.relays) ? latest.raw.relays : null
+    const relaySnapshot = rawRelays || relayDevices.map(device => ({
+      key: device.relayKey,
+      label: device.nama,
+      state: device.status === 'aktif',
+    }))
+
+    relayMap.relay1 = latest.relay1 ?? relayMap.relay1 ?? false
+    relayMap.relay2 = latest.relay2 ?? relayMap.relay2 ?? false
+
     return {
-      relay1: latest.relay1,
-      relay2: latest.relay2,
+      relay1: relayMap.relay1,
+      relay2: relayMap.relay2,
       updatedAt: latest.createdAt.toISOString(),
       source: latest.source,
+      relays: sortRelayEntries(relaySnapshot.map((entry, index) => normalizeRelayEntry(entry, index))).map(entry => ({
+        key: entry.key,
+        label: entry.label,
+        state: normalizeBoolean(entry.state, false),
+      })),
+      relayMap,
     }
   }
 
@@ -287,10 +682,16 @@ async function getRelayState() {
 
   if (mostRecent) {
     return {
-      relay1: mostRecent.relay1,
-      relay2: mostRecent.relay2,
+      relay1: relayMap.relay1 ?? mostRecent.relay1,
+      relay2: relayMap.relay2 ?? mostRecent.relay2,
       updatedAt: mostRecent.serverTimestamp.toISOString(),
       source: mostRecent.source,
+      relays: relayDevices.map(device => ({
+        key: device.relayKey,
+        label: device.nama,
+        state: device.status === 'aktif',
+      })),
+      relayMap,
     }
   }
 
@@ -317,11 +718,19 @@ module.exports = {
   INITIAL_RELAY_STATE,
   addReading,
   addAiInteraction,
+  createRelayDevice,
+  deleteRelayDevice,
   getLatestReading,
   getReadingHistory,
+  getRelayDevices,
   getRelayState,
   normalizeReading,
   normalizeBoolean,
+  buildRelayStateSnapshot,
+  relayDeviceToResponse,
+  ensureDefaultRelayDevices,
+  syncRelayDeviceState,
+  updateRelayDevice,
   syncLatestReading,
   toNumber,
   updateRelayState,

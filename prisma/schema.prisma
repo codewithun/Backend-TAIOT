@@ -118,6 +118,24 @@ model RelayState {
   @@index([createdAt])
 }
 
+model RelayDevice {
+  id          String   @id @default(cuid())
+  relayKey    String   @unique
+  nama        String
+  description String   @default("")
+  warna       String   @default("#a78bfa")
+  status      Boolean  @default(false)
+  isBuiltin   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  raw         Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([isBuiltin])
+  @@index([createdAt])
+}
+
 model AiInteraction {
   id        String   @id @default(cuid())
   prompt    String

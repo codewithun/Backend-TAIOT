@@ -2,6 +2,7 @@ const express = require('express')
 
 const { getLatestPzem, getPzemHistory, postPzem } = require('../controllers/pzemController')
 const { getRelayStateHandler, postRelayControl } = require('../controllers/relayController')
+const { createRelayDeviceHandler, deleteRelayDeviceHandler, listRelayDevicesHandler, updateRelayDeviceHandler } = require('../controllers/relayDeviceController')
 const { getSummarySnapshotHandler } = require('../controllers/summaryController')
 const { postAi } = require('../controllers/aiController')
 
@@ -20,6 +21,10 @@ apiRouter.get('/', (_req, res) => {
       'GET /summary',
       'GET /relay-state',
       'POST /relay-control',
+      'GET /relay-devices',
+      'POST /relay-devices',
+      'PATCH /relay-devices/:id',
+      'DELETE /relay-devices/:id',
       'POST /ai',
     ],
   })
@@ -34,6 +39,11 @@ apiRouter.get('/summary', getSummarySnapshotHandler)
 
 apiRouter.get('/relay-state', getRelayStateHandler)
 apiRouter.post('/relay-control', postRelayControl)
+
+apiRouter.get('/relay-devices', listRelayDevicesHandler)
+apiRouter.post('/relay-devices', createRelayDeviceHandler)
+apiRouter.patch('/relay-devices/:id', updateRelayDeviceHandler)
+apiRouter.delete('/relay-devices/:id', deleteRelayDeviceHandler)
 
 apiRouter.post('/ai', postAi)
 
