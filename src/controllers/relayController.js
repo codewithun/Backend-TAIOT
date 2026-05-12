@@ -1,4 +1,4 @@
-const { getRelayState, updateRelayState, buildRelayStateSnapshot } = require('../store')
+const { getRelayState, updateRelayState, buildRelayStateSnapshot, syncRelayDeviceState } = require('../store')
 const { sendRelayControl } = require('../services/externalApiService')
 
 async function getRelayStateHandler(_req, res, next) {
@@ -53,6 +53,15 @@ async function postRelayControl(req, res, next) {
       relay2: relayPayload.relay2,
       raw: payload,
     }, hasExtraRelays ? 'api-local-dynamic' : 'api')
+
+    // Ensure persisted RelayDevice statuses reflect the new relay state for built-in relays
+    try {
+      await syncRelayDeviceState('relay1', state.relay1)
+      await syncRelayDeviceState('relay2', state.relay2)
+    } catch (syncErr) {
+      // do not fail the request if syncing devices fails; just log
+      console.error('[RelayController] Failed to sync relay devices:', syncErr?.message || syncErr)
+    }
 
     return res.json({
       success: true,

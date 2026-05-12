@@ -87,10 +87,17 @@ async function updateRelayDeviceHandler(req, res, next) {
         raw: payload.raw || payload,
       }
 
-      await sendRelayControl({
-        relay1: nextRelayState.relay1,
-        relay2: nextRelayState.relay2,
-      })
+      // Attempt to send external relay control, but do not fail the whole request if the external call errors.
+      let externalError = null
+      try {
+        await sendRelayControl({
+          relay1: nextRelayState.relay1,
+          relay2: nextRelayState.relay2,
+        })
+      } catch (err) {
+        externalError = err
+        console.error('[RelayDeviceController] sendRelayControl failed:', err?.message || err)
+      }
 
       const savedState = await updateRelayState(nextRelayState, 'api')
       await syncRelayDeviceState('relay1', savedState.relay1)
@@ -99,6 +106,20 @@ async function updateRelayDeviceHandler(req, res, next) {
         ...payload,
         status: nextStatus,
       })
+
+      if (externalError) {
+        // Attach an informational warning to the response rather than throwing.
+        return res.status(200).json({
+          success: true,
+          message: 'Relay device updated (external relay-control failed)',
+          warning: externalError.message || String(externalError),
+          device: relayDeviceToResponse({
+            ...currentDevice,
+            ...updatedDevice,
+            status: nextStatus,
+          }),
+        })
+      }
     } else {
       updatedDevice = await updateRelayDevice(id, {
         ...payload,
